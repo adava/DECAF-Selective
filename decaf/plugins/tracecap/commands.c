@@ -136,6 +136,7 @@ void do_taint_sendkey(Monitor *mon, const QDict *qdict)
 	else
 	monitor_printf(mon, "taint_sendkey command is malformed\n");
 }
+
 #endif //CONFIG_TCG_TAINT
 
 static int tracing_init(void) {

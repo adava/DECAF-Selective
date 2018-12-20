@@ -16,6 +16,7 @@ extern "C" {
 /* Functions */
 void internal_do_taint_nic(Monitor *mon, int state);
 void do_taint_nic(Monitor *mon, const QDict *qdict);
+void do_perc(Monitor *mon, const QDict *qdict);
 void print_nic_filter (void);
 int update_nic_filter (const char *filter_str, const char *value_str);
 void tracing_nic_recv(DECAF_Callback_Params* params);

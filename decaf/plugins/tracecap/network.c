@@ -32,6 +32,7 @@ typedef struct tcpconn_record{
   uint32_t id;
   uint32_t origin;
   uint32_t curr_seq;
+  uint8_t  tainted;
   LIST_ENTRY(tcpconn_record) link;
 } tcpconn_record_t;
 
@@ -49,6 +50,10 @@ typedef struct {
   struct in_addr src;
   struct in_addr dst;
 } pkt_filter_t;
+
+uint32_t nconnections = 0;
+
+uint32_t res = 1;
 
 static pkt_filter_t pkt_filter;
 
@@ -69,6 +74,20 @@ void internal_do_taint_nic(Monitor *mon, int state)
 {
   monitor_printf(mon, "taint_nic_state set to %d\n", state);
   taint_nic_state = state;
+}
+
+// sina
+void do_perc(Monitor *mon, const QDict *qdict)
+{
+	  if (qdict_haskey(qdict, "percentage"))
+	  {
+		  res = qdict_get_int(qdict, "percentage");
+		  monitor_printf(mon, "percentage set to %d\n", res);
+	  }
+	  else{
+		  monitor_printf(mon, "percentage command is malformed\n");
+	  }
+
 }
 
 // AWH void do_taint_nic(int state)
@@ -277,7 +296,34 @@ static int tracing_add_tcp_conn(uint32_t conn_id, uint32_t seq)
     tcpconn->id = conn_id;
     tcpconn->origin = tcp_conn_ctr++;
     tcpconn->curr_seq = seq;
+    tcpconn->tainted = 0;
+    LIST_INSERT_HEAD(&tcpconn_record_head, tcpconn, link);
+    return 0;
+  }
+  else return -1;
+}
 
+/* Adds a new TCP connection if it does not exist */
+static int tracing_add_tcp_conn_tainted(uint32_t conn_id, uint32_t seq)
+{
+  static int tcp_conn_ctr = TAINT_ORIGIN_START_TCP_NIC_IN;
+
+  /* If the connection already exists, update seq and return */
+  tcpconn_record_t *tcp;
+  LIST_FOREACH(tcp, &tcpconn_record_head, link) {
+    if (tcp->id == conn_id) {
+      tcp->curr_seq = seq;
+      return 0;
+    }
+  }
+
+  /* Else, add new connection to list */
+  tcpconn_record_t *tcpconn = malloc(sizeof(tcpconn_record_t));
+  if (tcpconn) {
+    tcpconn->id = conn_id;
+    tcpconn->origin = tcp_conn_ctr++;
+    tcpconn->curr_seq = seq;
+    tcpconn->tainted = 1;
     LIST_INSERT_HEAD(&tcpconn_record_head, tcpconn, link);
     return 0;
   }
@@ -292,6 +338,18 @@ static uint32_t tracing_get_tcp_seq(uint32_t conn_id)
   LIST_FOREACH(tcp, &tcpconn_record_head, link) {
     if (tcp->id == conn_id)
       return tcp->curr_seq;
+  }
+  return 0;
+}
+
+/* sina Find the should-be-tainted for the given connection. Zero if it shouldn't be */
+static uint32_t tracing_get_tcp_tainted(uint32_t conn_id)
+{
+  /* Find connection in list */
+  tcpconn_record_t *tcp;
+  LIST_FOREACH(tcp, &tcpconn_record_head, link) {
+    if (tcp->id == conn_id)
+      return tcp->tainted;
   }
   return 0;
 }
@@ -331,6 +389,9 @@ void tracing_nic_recv(DECAF_Callback_Params* params)
 	int stop=params->nr.stop;
 	int index=params->nr.cur_pos;
 
+	//sina
+	uint8_t flg1=0;
+
 	/* If no data, return */
 	if ((buf == NULL )|| (size == 0))return;
 
@@ -367,6 +428,9 @@ void tracing_nic_recv(DECAF_Callback_Params* params)
 
 		/* If it is a SYN-ACK packet, create a new outbound connection */
 		if ((tcph->th_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK)) {
+			nconnections++;
+			//DECAF_printf("New Connection in rec: ID: %u  %d\n",conn_id,nconnections);
+
 			tracing_add_tcp_conn(conn_id, ntohl(tcph->th_seq) + 1);
 
 			if (tracenetlog) {
@@ -382,6 +446,10 @@ void tracing_nic_recv(DECAF_Callback_Params* params)
 		/* If the corresponding connection exists, grab sequence number and
 		 set length */
 		if ((seq = tracing_get_tcp_seq(conn_id))) {
+			flg1 = tracing_get_tcp_tainted(conn_id);
+			if(!flg1){
+				return;
+			}
 			/* If it's a FIN packet, then no more data coming, delete connection */
 			/*   but handle packet normally since FIN packet can carry data */
 			if (tcph->th_flags & TH_FIN) {
@@ -393,10 +461,10 @@ void tracing_nic_recv(DECAF_Callback_Params* params)
 		}
 		if (len2) {
 			record.taintBytes[0].origin = tracing_get_tcp_origin(conn_id);
-			DECAF_printf("Received new TCP data: %010u %s:%d-->%s:%d (%d)\n",
-					record.taintBytes[0].origin, inet_ntoa(iph->ip_src),
-					ntohs(tcph->th_sport), inet_ntoa(iph->ip_dst),
-					ntohs(tcph->th_dport), len2);
+//			DECAF_printf("Received new TCP data: %010u %s:%d-->%s:%d (%d)\n",
+//					record.taintBytes[0].origin, inet_ntoa(iph->ip_src),
+//					ntohs(tcph->th_sport), inet_ntoa(iph->ip_dst),
+//					ntohs(tcph->th_dport), len2);
 			if (tracenetlog) {
 				fprintf(tracenetlog,
 						"Received new TCP data: %010u %s:%d-->%s:%d (%d)\n",
@@ -504,6 +572,8 @@ void tracing_nic_send(DECAF_Callback_Params* params)
 	uint8_t * buf = params->ns.buf;
 	uint32_t conn_id = 0;
 
+	uint8_t flag = 1;
+
 	/* If no data, return */
 	if ((buf == NULL) || (size == 0))
 		return;
@@ -522,8 +592,16 @@ void tracing_nic_send(DECAF_Callback_Params* params)
 		/* This is slightly preferred over creating the connection when
         the SYN is received */
 		if ((tcph->th_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK)) {
+			nconnections++;
+//			DECAF_printf("New Connection in send: ID: %u  %d\n",conn_id,nconnections);
 			conn_id = compute_conn_id(iph, tcph, NULL);
-			tracing_add_tcp_conn(conn_id, ntohl(tcph->th_ack));
+			flag = nconnections % res;
+			if (flag){
+				tracing_add_tcp_conn(conn_id, ntohl(tcph->th_ack));
+			}
+			else{
+				tracing_add_tcp_conn_tainted(conn_id, ntohl(tcph->th_ack));
+			}
 
 			if (tracenetlog) {
 				uint32_t origin = tracing_get_tcp_origin(conn_id);

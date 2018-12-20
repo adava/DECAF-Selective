@@ -51,6 +51,13 @@
 	.params		= "key taint_origin offset",
 	.help		= "send a tainted key to the guest system"
 },
+{
+	.name		= "taint_perc",
+	.args_type	= "percentage:i",
+	.mhandler.cmd	= do_perc,
+	.params		= "inverse of the percentage of network inputs to be tainted e.g. for 20 percent use 5",
+	.help		= "set the percentage of the inputs to be tainted"
+},
 
 #endif//CONFIG_TCG_TAINT
 
