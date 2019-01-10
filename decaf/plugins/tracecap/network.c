@@ -54,6 +54,7 @@ typedef struct {
 uint32_t nconnections = 0;
 
 uint32_t res = 1;
+uint32_t counttaintcounter = 0;
 
 static pkt_filter_t pkt_filter;
 
@@ -79,6 +80,7 @@ void internal_do_taint_nic(Monitor *mon, int state)
 // sina
 void do_perc(Monitor *mon, const QDict *qdict)
 {
+	  tracing_del_tcp_connections();
 	  if (qdict_haskey(qdict, "percentage"))
 	  {
 		  res = qdict_get_int(qdict, "percentage");
@@ -286,6 +288,7 @@ static int tracing_add_tcp_conn(uint32_t conn_id, uint32_t seq)
   LIST_FOREACH(tcp, &tcpconn_record_head, link) {
     if (tcp->id == conn_id) {
       tcp->curr_seq = seq;
+      tcp->tainted = 0;
       return 0;
     }
   }
@@ -303,6 +306,19 @@ static int tracing_add_tcp_conn(uint32_t conn_id, uint32_t seq)
   else return -1;
 }
 
+static void taint_update_tcp_conn(uint32_t conn_id, uint32_t taint)
+{
+  static int tcp_conn_ctr = TAINT_ORIGIN_START_TCP_NIC_IN;
+  /* If the connection already exists, update taint and return */
+  tcpconn_record_t *tcp;
+  LIST_FOREACH(tcp, &tcpconn_record_head, link) {
+    if (tcp->id == conn_id) {
+    	tcp->tainted = taint;
+      return ;
+    }
+  }
+}
+
 /* Adds a new TCP connection if it does not exist */
 static int tracing_add_tcp_conn_tainted(uint32_t conn_id, uint32_t seq)
 {
@@ -313,6 +329,7 @@ static int tracing_add_tcp_conn_tainted(uint32_t conn_id, uint32_t seq)
   LIST_FOREACH(tcp, &tcpconn_record_head, link) {
     if (tcp->id == conn_id) {
       tcp->curr_seq = seq;
+      tcp->tainted = 1;
       return 0;
     }
   }
@@ -379,6 +396,17 @@ static int tracing_del_tcp_conn(uint32_t conn_id)
     }
   }
   return 0;
+}
+
+/* Delete all tcp connections*/
+void tracing_del_tcp_connections()
+{
+  /* Find connection in list and delete it */
+  tcpconn_record_t *tcp;
+  LIST_FOREACH(tcp, &tcpconn_record_head, link) {
+      LIST_REMOVE(tcp, link);
+      free(tcp);
+    }
 }
 
 void tracing_nic_recv(DECAF_Callback_Params* params)
@@ -572,7 +600,7 @@ void tracing_nic_send(DECAF_Callback_Params* params)
 	uint8_t * buf = params->ns.buf;
 	uint32_t conn_id = 0;
 
-	uint8_t flag = 1;
+	uint32_t flag = 1;
 
 	/* If no data, return */
 	if ((buf == NULL) || (size == 0))
@@ -591,11 +619,12 @@ void tracing_nic_send(DECAF_Callback_Params* params)
 		/* If it is a SYN-ACK packet, create a new inbound connection */
 		/* This is slightly preferred over creating the connection when
         the SYN is received */
+		counttaintcounter++;
 		if ((tcph->th_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK)) {
 			nconnections++;
 //			DECAF_printf("New Connection in send: ID: %u  %d\n",conn_id,nconnections);
 			conn_id = compute_conn_id(iph, tcph, NULL);
-			flag = nconnections % res;
+			flag = counttaintcounter % res; //sina: tainting based on the perc option
 			if (flag){
 				tracing_add_tcp_conn(conn_id, ntohl(tcph->th_ack));
 			}
@@ -610,6 +639,12 @@ void tracing_nic_send(DECAF_Callback_Params* params)
 						conn_id, origin, inet_ntoa(iph->ip_dst), ntohs(tcph->th_dport),
 						inet_ntoa(iph->ip_src), ntohs(tcph->th_sport));
 				fflush(tracenetlog);
+			}
+		}
+		else { //sina: for taint perc
+			conn_id = compute_conn_id(iph, tcph, NULL);
+			if(conn_id){
+				taint_update_tcp_conn(conn_id,!(counttaintcounter % res));
 			}
 		}
 	}

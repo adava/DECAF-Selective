@@ -271,6 +271,7 @@ int is_physial_page_tainted(ram_addr_t addr)
     unsigned int leaf_node_index;
     tbitpage_leaf_t *leaf_node = NULL;
 
+
     if (!taint_memory_page_table || addr >= ram_size)
         return 0;
 
@@ -281,6 +282,9 @@ int is_physial_page_tainted(ram_addr_t addr)
         return 0;
 
     leaf_node = taint_memory_page_table[middle_node_index]->leaf[leaf_node_index];
+//    if (leaf_node != NULL){
+//    	DECAF_printf("0x%x\n",middle_node_index);
+//    }
     return (leaf_node != NULL);
 }
 
@@ -597,10 +601,10 @@ void REGPARM __taint_stq_raw_paddr(ram_addr_t addr, gva_t vaddr) {
 	}
 #endif /* TCG_TARGET_REG_BITS check */
 
-	if ((cpu_single_env->tempidx || cpu_single_env->tempidx2) && DECAF_is_callback_needed (DECAF_WRITE_TAINTMEM_CB) )
+	if ((env->tempidx || env->tempidx2) && DECAF_is_callback_needed (DECAF_WRITE_TAINTMEM_CB) )
 	{
-		taint_temp[0] = cpu_single_env->tempidx;
-		taint_temp[1] = cpu_single_env->tempidx2;
+		taint_temp[0] = env->tempidx;
+		taint_temp[1] = env->tempidx2;
 		helper_DECAF_invoke_write_taint_mem(vaddr, addr, 8, (uint8_t *)taint_temp);
 	}
 }
@@ -714,7 +718,7 @@ void do_enable_tainting_internal(void) {
 void do_disable_tainting_internal(void) {
   if (taint_tracking_enabled) {
     CPUState *env = cpu_single_env ? cpu_single_env : first_cpu;
-
+    taintcheck_cleanup(); //sina: call to clean the nic taints
     DECAF_stop_vm();
     tb_flush(env);
     free_taint_memory_page_table();
@@ -734,6 +738,7 @@ int do_enable_taint_nic_internal(void) {
 
 int do_disable_taint_nic_internal(void) {
   if (taint_nic_enabled) {
+	taintcheck_cleanup(); //sina: call to clean the nic taints
     DECAF_stop_vm();
     taint_nic_enabled = 0;
     DECAF_start_vm();
