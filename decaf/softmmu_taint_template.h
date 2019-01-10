@@ -96,10 +96,12 @@ DATA_TYPE REGPARM glue(glue(__taint_ld, SUFFIX), MMUSUFFIX)(target_ulong addr,
     unsigned long addend;
     void *retaddr;
 
+#if !defined(CONFIG_ZERO_OVERHEAD)
     //Set the taint to zero. Then if we read from a tainted page, it will go through taint_io_read function, which later goes into taint_mem_read
     env->tempidx = 0;
 #if ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8))
     env->tempidx2 = 0;
+#endif
 #endif
 
     /* test if there is match for unaligned or IO access */
@@ -184,6 +186,7 @@ static DATA_TYPE glue(glue(taint_slow_ld, SUFFIX), MMUSUFFIX)(target_ulong addr,
 
         //FIXME: need to doublecheck if we handle tempidx2 correctly
 /* Special case for 32-bit host/guest and a 64-bit load */
+#if !defined(CONFIG_ZERO_OVERHEAD)
 #if ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8))
             taint1 = env->tempidx2;
             taint1 = taint1 << 32;
@@ -191,8 +194,10 @@ static DATA_TYPE glue(glue(taint_slow_ld, SUFFIX), MMUSUFFIX)(target_ulong addr,
 #else
             taint1 = env->tempidx;
 #endif /* ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8)) */
+#endif
             res2 = glue(glue(taint_slow_ld, SUFFIX), MMUSUFFIX)(addr2,
                                                           mmu_idx, retaddr);
+#if !defined(CONFIG_ZERO_OVERHEAD)
 #if ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8))
             taint2 = env->tempidx2;
             taint2 = taint2 << 32;
@@ -200,23 +205,28 @@ static DATA_TYPE glue(glue(taint_slow_ld, SUFFIX), MMUSUFFIX)(target_ulong addr,
 #else
             taint2 = env->tempidx;
 #endif /* ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8)) */
+#endif
             shift = (addr & (DATA_SIZE - 1)) * 8;
 #ifdef TARGET_WORDS_BIGENDIAN
             res = (res1 << shift) | (res2 >> ((DATA_SIZE * 8) - shift));
+#if !defined(CONFIG_ZERO_OVERHEAD)
 #if ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8))
             env->tempidx = ((taint1 << shift) | (taint2 >> ((DATA_SIZE * 8) - shift))) & 0xFFFFFFFF;
             env->tempidx2 = (((taint1 << shift) | (taint2 >> ((DATA_SIZE * 8) - shift))) >> 32) & 0xFFFFFFFF;
 #else
             env->tempidx = (taint1 << shift) | (taint2 >> ((DATA_SIZE * 8) - shift));
 #endif /* ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8)) */
+#endif
 #else
             res = (res1 >> shift) | (res2 << ((DATA_SIZE * 8) - shift));
+#if !defined(CONFIG_ZERO_OVERHEAD)
 #if ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8))
             env->tempidx = ((taint1 >> shift) | (taint2 << ((DATA_SIZE * 8) - shift))) & 0xFFFFFFFF;
             env->tempidx2 = (((taint1 >> shift) | (taint2 << ((DATA_SIZE * 8) - shift))) >> 32) & 0xFFFFFFFF;
 #else
             env->tempidx = (taint1 >> shift) | (taint2 << ((DATA_SIZE * 8) - shift));
 #endif /* ((TCG_TARGET_REG_BITS == 32) && (DATA_SIZE == 8)) */
+#endif
 #endif /* TARGET_WORDS_BIGENDIAN */
             res = (DATA_TYPE)(res);
         } else {

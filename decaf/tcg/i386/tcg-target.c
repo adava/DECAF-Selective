@@ -146,7 +146,9 @@ static void REGPARM stq_cb(unsigned long addr, gva_t vaddr, unsigned long value)
 
 
 static void REGPARM taint_ldb_cb(unsigned long addr, gva_t vaddr) {
-  __taint_ldb_raw((void *)addr, vaddr);
+
+ __taint_ldb_raw((void *)addr, vaddr);
+
 #ifdef CONFIG_MEM_READ_CB
   if(DECAF_is_callback_needed(DECAF_MEM_READ_CB))
     helper_DECAF_invoke_mem_read_callback(vaddr,qemu_ram_addr_from_host_nofail((void *)(addr)), *(uint8_t *) addr, 1);
@@ -154,7 +156,8 @@ static void REGPARM taint_ldb_cb(unsigned long addr, gva_t vaddr) {
 }
 
 static void REGPARM taint_ldw_cb(unsigned long addr, gva_t vaddr ) {
-  __taint_ldw_raw((void *)addr, vaddr);
+	__taint_ldw_raw((void *)addr, vaddr);
+
 #ifdef CONFIG_MEM_READ_CB
   if(DECAF_is_callback_needed(DECAF_MEM_READ_CB))
     helper_DECAF_invoke_mem_read_callback(vaddr,qemu_ram_addr_from_host_nofail((void *)(addr)), *(uint16_t*) addr, 2);
@@ -162,8 +165,7 @@ static void REGPARM taint_ldw_cb(unsigned long addr, gva_t vaddr ) {
 }
 
 static void REGPARM taint_ldl_cb(unsigned long addr, gva_t vaddr) {
-//fprintf(stderr, "taint_ldl_cb: %08x %08x\n", addr, vaddr);
-  __taint_ldl_raw((void *)addr, vaddr);
+	__taint_ldl_raw((void *)addr, vaddr);
 #ifdef CONFIG_MEM_READ_CB
   if(DECAF_is_callback_needed(DECAF_MEM_READ_CB))
     helper_DECAF_invoke_mem_read_callback(vaddr,qemu_ram_addr_from_host_nofail((void *)(addr)), *(uint32_t * ) addr, 4);
@@ -171,7 +173,7 @@ static void REGPARM taint_ldl_cb(unsigned long addr, gva_t vaddr) {
 }
 
 static void REGPARM taint_ldq_cb(unsigned long addr, gva_t vaddr) {
-  __taint_ldq_raw((void *)addr, vaddr);
+	__taint_ldq_raw((void *)addr, vaddr);
 #ifdef CONFIG_MEM_READ_CB
   if(DECAF_is_callback_needed(DECAF_MEM_READ_CB))
     helper_DECAF_invoke_mem_read_callback(vaddr,qemu_ram_addr_from_host_nofail((void *)(addr)), *(uint64_t *) addr, 8);
@@ -1172,6 +1174,7 @@ static inline void tcg_out_tlb_load(TCGContext *s, int addrlo_idx,
     tcg_out_mov(s, type, r1, addrlo);
     tcg_out_mov(s, type, r0, addrlo);
 
+#if !defined(CONFIG_ZERO_OVERHEAD) //sina: removing tempidx checking overhead
 #ifdef CONFIG_TCG_TAINT
     //This is a bit awkward to put this piece of code here. The reason is the above two lines stores virtual address into
     //tcg_target_call_iarg_regs. The code in tcg_out_(taint_)qemu_ld/st asssumes this has been done. So for TLB Miss case,
@@ -1194,9 +1197,14 @@ static inline void tcg_out_tlb_load(TCGContext *s, int addrlo_idx,
         }
         tcg_out_pop(s, TCG_REG_RAX);
         tcg_out8(s, OPC_JCC_short + JCC_JNE);
+#if defined(CONFIG_ZERO_OVERHEAD)
+        label_ptr[0] = s->code_ptr;
+#else
         label_ptr[2] = s->code_ptr;
+#endif
         s->code_ptr++;
     }
+#endif
 #endif
 
     tcg_out_shifti(s, SHIFT_SHR + rexw, r1,
@@ -1380,8 +1388,34 @@ static void tcg_out_qemu_ld(TCGContext *s, const TCGArg *args,
         tcg_out_pop(s, data_reg2);
 #endif
 
+
     tcg_out_qemu_ld_direct(s, data_reg, data_reg2,
                            tcg_target_call_iarg_regs[0], 0, opc);
+//#if defined(CONFIG_ZERO_OVERHEAD) //sina: technically this should run like tcg_out_taint_qemu_ld but for removing overhead, it is commented
+//    //TLB Hit means the related page is not tainted (otherwise, it will go through io_mem_taint).
+//     //So we can skip checking shadow memory and simply set taint (stored in args[1]) as zero.
+//     tcg_out_movi(s, TCG_TYPE_TL, TCG_REG_EAX, 0);
+//     switch (s_bits) {
+//     case 0:
+//     case 0 | 4:
+//     case 1:
+//     case 1 | 4:
+//     case 2:
+//         tcg_out_st(s, TCG_TYPE_TL, TCG_REG_EAX, s->temps[tempidx].mem_reg, s->temps[tempidx].mem_offset);
+//         break;
+//     case 3:
+//         if (TCG_TARGET_REG_BITS == 32 && TARGET_LONG_BITS == 64) {
+//             //tcg_out_st(s, TCG_TYPE_TL, TCG_REG_EAX, cpu_single_env, offsetof(CPUState, tempidx));
+//             //tcg_out_st(s, TCG_TYPE_TL, TCG_REG_EAX, cpu_single_env, offsetof(CPUState, tempidx2));
+//         } else {
+//             //tcg_out_st(s, TCG_TYPE_TL, TCG_REG_EAX, cpu_single_env, offsetof(CPUState, tempidx));
+//         }
+//         break;
+//     default:
+//         tcg_abort();
+//     }
+//#endif
+
 
     /* jmp label2 */
     tcg_out8(s, OPC_JMP_short);
@@ -1405,7 +1439,11 @@ static void tcg_out_qemu_ld(TCGContext *s, const TCGArg *args,
     }
     tcg_out_movi(s, TCG_TYPE_I32, tcg_target_call_iarg_regs[arg_idx],
                  mem_index);
+#if defined(CONFIG_ZERO_OVERHEAD)
+    tcg_out_calli(s, (tcg_target_long)taint_qemu_ld_helpers[s_bits]);
+#else
     tcg_out_calli(s, (tcg_target_long)qemu_ld_helpers[s_bits]);
+#endif
 
     switch(opc) {
     case 0 | 4:
@@ -1645,7 +1683,11 @@ static void tcg_out_qemu_st(TCGContext *s, const TCGArg *args,
         }
     }
 
+#if defined(CONFIG_ZERO_OVERHEAD)
+    tcg_out_calli(s, (tcg_target_long)taint_qemu_st_helpers[s_bits]);
+#else
     tcg_out_calli(s, (tcg_target_long)qemu_st_helpers[s_bits]);
+#endif
 
     if (stack_adjust == (TCG_TARGET_REG_BITS / 8)) {
         /* Pop and discard.  This is 2 bytes smaller than the add.  */
@@ -1840,6 +1882,7 @@ static void tcg_out_taint_qemu_ld(TCGContext *s, const TCGArg *args, int opc)
 
     //TLB Hit means the related page is not tainted (otherwise, it will go through io_mem_taint).
     //So we can skip checking shadow memory and simply set taint (stored in args[1]) as zero.
+#if !defined(CONFIG_ZERO_OVERHEAD)
     tcg_out_movi(s, TCG_TYPE_TL, TCG_REG_EAX, 0);
     switch (s_bits) {
     case 0:
@@ -1860,7 +1903,7 @@ static void tcg_out_taint_qemu_ld(TCGContext *s, const TCGArg *args, int opc)
     default:
         tcg_abort();
     }
-
+#endif
     //TODO: call memory read callback 
 
     /* jmp label2 */

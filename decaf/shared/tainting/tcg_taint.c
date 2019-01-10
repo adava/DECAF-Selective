@@ -141,6 +141,105 @@ static uint8_t gen_old_liveness_metadata[OPC_BUF_SIZE];
 static void build_liveness_metadata(TCGContext *s);
 #endif /* USE_TCG_OPTIMIZATIONS */
 
+#if defined(CONFIG_ZERO_OVERHEAD)
+static inline int gen_taintcheck_insn_light(int search_pc) ///sina: This function instruments only Qemu load for the no-overhead code cache
+{
+#ifdef CONFIG_TCG_TAINT
+  /* Opcode and parameter buffers */
+  static uint16_t gen_old_opc_buf[OPC_BUF_SIZE];
+  static TCGArg gen_old_opparam_buf[OPPARAM_BUF_SIZE];
+  /* Metadata buffers for "search_pc" TBs */
+  static target_ulong gen_old_opc_pc[OPC_BUF_SIZE];
+  static uint8_t gen_old_opc_instr_start[OPC_BUF_SIZE];
+  static uint16_t gen_old_opc_icount[OPC_BUF_SIZE];
+#if defined(TARGET_I386)
+  static uint8_t gen_old_opc_cc_op[OPC_BUF_SIZE];
+#if 0 // AWH - in helper_i386_check.h
+  /* For INB, INW, INL helper functions */
+  int in_helper_func = 0;
+  /* For OUTB, OUTW, OUTL helper functions */
+  int out_helper_func = 0;
+  /* For CMPXCHG helper function */
+  int cmpxchg_helper_func = 0;
+#endif // AWH
+#elif defined(TARGET_ARM)
+  static uint32_t gen_old_opc_condexec_bits[OPC_BUF_SIZE];
+#endif /* TARGET check */
+  int metabuffer_offset = 0;
+
+  int nb_opc = gen_opc_ptr - gen_old_opc_ptr;
+  int return_lj = -1;
+
+  int nb_args=0;
+  int opc_index=0, opparam_index=0;
+  int i=0/*, x=0*/;
+  uint16_t opc=0;
+  int nb_oargs=0, nb_iargs=0, nb_cargs=0;
+  TCGv arg0, arg1, arg2, arg3, arg4, arg5;
+  TCGv t0, t1, t2, t3, t4, t_zero;
+#if defined(TARGET_I386)
+  TCGv arg6, t5, t6;
+#endif /* TARGET check */
+  TCGv orig0, orig1, orig2, orig3, orig4, orig5;
+
+  /* Copy all of the existing ops/parms into a new buffer to back them up. */
+  memcpy(gen_old_opc_buf, gen_old_opc_ptr, sizeof(uint16_t)*(nb_opc)); //sina: it seems that gen_old_opc_ptr holds the opcodes
+  memcpy(gen_old_opparam_buf, gen_old_opparam_ptr, sizeof(TCGArg)* (gen_opparam_ptr - gen_old_opparam_ptr)); //sina: It seems that gen_opparam_ptr and gen_old_opparam_ptr have the arguments and parameters for an operation
+                                                                                                            //gen_opparam_ptr just holds the index that implicitly corresponds to a variables. The allocation is by calling tcg_temp_new_internal that internally uses TCGContext data structure to track the last index number
+
+  /* If we're inserting taint IR into a searchable TB, copy all of the
+     existing metadata for the TB into a new buffer to back them up. */
+  if (search_pc) {
+    /* Figure out where we're starting in the metabuffers */
+    metabuffer_offset = gen_old_opc_ptr - gen_opc_buf;
+
+    /* Make our backup copies of the metadata buffers */
+    memcpy(gen_old_opc_pc, (gen_opc_pc + metabuffer_offset), sizeof(target_ulong)*(nb_opc));
+    memcpy(gen_old_opc_instr_start, (gen_opc_instr_start + metabuffer_offset), sizeof(uint8_t)*(nb_opc));
+    memcpy(gen_old_opc_icount, (gen_opc_icount + metabuffer_offset), sizeof(uint16_t)*(nb_opc));
+#if defined(TARGET_I386)
+    memcpy(gen_old_opc_cc_op, (gen_opc_cc_op + metabuffer_offset), sizeof(uint8_t)*(nb_opc));
+#elif defined(TARGET_ARM)
+    memcpy(gen_old_opc_condexec_bits, (gen_opc_condexec_bits + metabuffer_offset), sizeof(uint32_t)*(nb_opc));
+#endif /* TARGET check */
+
+    memset(gen_opc_instr_start + metabuffer_offset, 0, sizeof(uint8_t) * (OPC_BUF_SIZE - metabuffer_offset));
+  }
+  else{
+	    return return_lj;
+  }
+
+  /* Reset the ops/parms buffers */
+  gen_opc_ptr = gen_old_opc_ptr;
+//  gen_opparam_ptr = gen_old_opparam_ptr;
+
+#if defined(LOG_TAINTED_EIP)
+  /* Allocate our temps for logging taint */
+  for (i=0; i < MAX_TAINT_LOG_TEMPS; i++)
+#if TCG_TARGET_REG_BITS == 32
+    taint_log_temps[i] = tcg_temp_new_i32();
+#else
+    taint_log_temps[i] = tcg_temp_new_i64();
+#endif /* TCG_TARGET_REG_BITS */
+#endif /* LOG_ check */
+
+  /* Copy and instrument the opcodes that need taint tracking */
+  while(opc_index < nb_opc) { //sina: note that nb_opc holds the number of operands
+    /* If needed, copy all of the appropriate metadata */
+    if (search_pc && (gen_old_opc_instr_start[opc_index] == 1)) {
+      return_lj = gen_opc_ptr - gen_opc_buf;
+      gen_opc_instr_start[return_lj] = 1;
+    }
+    opc = *(gen_opc_ptr++);
+    opc_index++;
+   }
+    return return_lj;
+#else
+  return 0;
+#endif
+}
+#endif
+
 #ifdef CONFIG_2nd_CCACHE
 
 static inline int gen_taintcheck_insn_ld(int search_pc) ///sina: This function instruments only Qemu load for the no-overhead code cache
@@ -374,23 +473,19 @@ static inline int gen_taintcheck_insn_ld(int search_pc) ///sina: This function i
                 t1 = tcg_temp_new_i32();
                 t2 = tcg_temp_new_i32();
                 t3 = tcg_temp_new_i32();
-
                 /* Load taint from tempidx */
                 tcg_gen_ld_i32(t2, cpu_env, offsetof(OurCPUState,tempidx));
                 tcg_gen_ld_i32(t3, cpu_env, offsetof(OurCPUState, tempidx2));
-
                 /* Check for pointer taint */
                 t_zero = tcg_temp_new_i32();
                 tcg_gen_movi_i32(t_zero, 0);
                 tcg_gen_setcond_i32(TCG_COND_NE, t1, arg2, t_zero);
                 tcg_gen_neg_i32(t0, t1);
-
                 /* Combine pointer and tempidx taint */
                 if (arg0)
                   tcg_gen_or_i32(arg0, t0, t2);
                 if (arg1)
                   tcg_gen_or_i32(arg1, t0, t3);
-
               } else {
                 /* Patch in opcode to load taint from tempidx */
                 if (arg0)
@@ -419,16 +514,13 @@ static inline int gen_taintcheck_insn_ld(int search_pc) ///sina: This function i
                 t1 = tcg_temp_new_i64();
                 t2 = tcg_temp_new_i64();
                 t3 = tcg_temp_new_i64();
-
                 /* Load taint from tempidx */
                 tcg_gen_ld_i64(t3, cpu_env, offsetof(OurCPUState,tempidx));
-
                 /* Check for pointer taint */
                 t_zero = tcg_temp_new_i64();
                 tcg_gen_movi_i64(t_zero, 0);
                 tcg_gen_setcond_i64(TCG_COND_NE, t2, arg1, t_zero);
                 tcg_gen_neg_i64(t0, t2);
-
                 /* Combine pointer and tempidx taint */
                 tcg_gen_or_i64(arg0, t0, t3);
               } else
@@ -517,7 +609,6 @@ static inline int gen_taintcheck_insn_ld(int search_pc) ///sina: This function i
   return 0;
 #endif /* CONFIG_TCG_TAINT */
 }
-
 #endif /* CONFIG_2nd_CCACHE */
 
 static inline int gen_taintcheck_insn(int search_pc)
@@ -2996,13 +3087,14 @@ static inline int gen_taintcheck_insn(int search_pc)
 
 int optimize_taint(int search_pc) {
 int retVal;
+
+
 #ifdef USE_TCG_OPTIMIZATIONS
     if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP_OPT))) {
         qemu_log("OP partial buffer before optimization:\n");
         tcg_dump_ops(&tcg_ctx, logfile);
         qemu_log("\n");
     }
-
     gen_opparam_ptr =
         tcg_optimize(&tcg_ctx, gen_opc_ptr, gen_opparam_buf, tcg_op_defs);
 #if 0 // AWH - Causes phantom taint in tempidx, so remove for now
@@ -3026,15 +3118,26 @@ int retVal;
 #if defined(CONFIG_2nd_CCACHE)
 	if(second_ccache_flag){
 		if (ccache_debug){
-			DECAF_printf("Full instrumentation by calling gen_taintcheck_insn in tcg_taint.c:3136!\n");
+			//DECAF_printf("Full instrumentation by calling gen_taintcheck_insn in tcg_taint.c:3029!\n");
 		}
 		retVal = gen_taintcheck_insn(search_pc);
 	}
 	else{
 		if (ccache_debug){
-			DECAF_printf("qemu_ld only instrumentation by calling gen_taintcheck_insn_ld in tcg_taint.c:3146!\n");
+			//DECAF_printf("qemu_ld only instrumentation by calling gen_taintcheck_insn_ld in tcg_taint.c:3035!\n");
 		}
+#if !defined(CONFIG_ZERO_OVERHEAD)
 		retVal = gen_taintcheck_insn_ld(search_pc);
+#else
+		if(search_pc){
+			retVal = gen_taintcheck_insn_light(search_pc);
+		}
+		else{
+			retVal = -1;
+			return retVal;
+		}
+
+#endif
 	}
 #else
 	retVal = gen_taintcheck_insn(search_pc);
