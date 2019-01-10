@@ -118,6 +118,7 @@ tcg_taint="no"
 tcg_ir_log="no"
 #Sina - 2nd code cache disabled by default
 second_code_cache="no"
+zero_overhead_mode="no"
 bluez=""
 brlapi=""
 curl=""
@@ -830,7 +831,11 @@ for opt do
   # Sina - 2nd code cache support
   --enable-2nd-ccache) second_code_cache="yes"
   ;;
+  --enable-zero-overhead) zero_overhead_mode="yes"
+  ;;
   --disable-2nd-ccache) second_code_cache="no"
+  ;;
+  --disable-zero-overhead) zero_overhead_mode="no"
   ;;
   # AWH - VMI support
   --enable-vmi) enable_vmi="yes"
@@ -2955,6 +2960,7 @@ echo "enable IR logging $tcg_ir_log"
 echo "enable TCG LLVM   $tcg_llvm"
 #AWH - Sina
 echo "enable optimization  $second_code_cache"
+echo "enable zero overhead  $zero_overhead_mode"
 # AWH - VMI
 echo "enable VMI        $enable_vmi"
 
@@ -3007,9 +3013,12 @@ fi
 if test "$tcg_llvm" = "yes" ; then
   echo "CONFIG_TCG_LLVM=y" >> $config_host_mak
 fi
-#AWH - 2nd code cache optimization
+#sina - 2nd code cache optimization
 if test "$second_code_cache" = "yes" ; then
   echo "CONFIG_2nd_CCACHE=y" >> $config_host_mak
+fi
+if test "$zero_overhead_mode" = "yes" ; then
+  echo "CONFIG_ZERO_OVERHEAD=y" >> $config_host_mak
 fi
 #AWH - TCG tainting
 if test "$tcg_taint" = "yes" ; then
