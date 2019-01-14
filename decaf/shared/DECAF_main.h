@@ -26,6 +26,12 @@ http://code.google.com/p/decaf-platform/
 #if defined(CONFIG_2nd_CCACHE) //sina
 	#define EXCP12_TNT	39
 	extern int second_ccache_flag;
+	extern struct timespec leaving_1cache;
+	extern struct timespec entering_2cache;
+	extern struct timespec proc_start_time;
+	extern struct timespec proc_end_time;
+	extern double transition_overhead;
+	extern long ld_addr;
 #endif
 
 #include "qemu-common.h"

@@ -105,7 +105,13 @@ static int nb_tbs;
 spinlock_t tb_lock = SPIN_LOCK_UNLOCKED;
 #if defined(CONFIG_2nd_CCACHE) && defined(CONFIG_TCG_TAINT) //sina
 	int second_ccache_flag = 0; //sina
+	struct timespec leaving_1cache ;
+	struct timespec entering_2cache ;
+	long ld_addr = 0;
+	double transition_overhead = 0;
 	int num_switches_happend = 0;
+	struct timespec proc_start_time;
+	struct timespec proc_end_time;
 #endif
 #if defined(__arm__) || defined(__sparc_v9__)
 /* The prologue must be reachable with a direct jump. ARM and Sparc64

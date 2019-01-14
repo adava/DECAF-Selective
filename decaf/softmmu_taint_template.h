@@ -27,6 +27,9 @@
 /* Get rid of some implicit function declaration warnings */
 #include "tainting/taint_memory.h"
 
+#include <sys/time.h> //sina
+#include <math.h>
+
 //#ifdef CONFIG_2nd_CCACHE //sina
 //	TranslationBlock *tb_find_pc(unsigned long pc_ptr);
 //	int cpu_restore_state(struct TranslationBlock *tb, CPUState *env, unsigned long searched_pc);
@@ -45,6 +48,10 @@ static inline DATA_TYPE glue(taint_io_read, SUFFIX)(target_phys_addr_t physaddr,
 #endif
     DATA_TYPE res;
     int index;
+
+    unsigned long s;
+    double ms;
+
     index = (physaddr >> IO_MEM_SHIFT) & (IO_MEM_NB_ENTRIES - 1);
     physaddr = (physaddr & TARGET_PAGE_MASK) + addr;
     env->mem_io_pc = (unsigned long)retaddr;
@@ -67,9 +74,24 @@ static inline DATA_TYPE glue(taint_io_read, SUFFIX)(target_phys_addr_t physaddr,
 #endif /* SHIFT > 2 */
 
 #if defined(CONFIG_2nd_CCACHE) && defined(TARGET_I386)//sina
+
+    if(second_ccache_flag && ld_addr==addr){ //sina: measuring transition overhead
+    	//entering_2cache = time(NULL);
+    	clock_gettime(CLOCK_REALTIME, &entering_2cache);
+    	s = entering_2cache.tv_sec - leaving_1cache.tv_sec;
+    	ms =  (entering_2cache.tv_nsec - leaving_1cache.tv_nsec)/ 1.0e6;
+    	transition_overhead += ms + (s*1000);
+    	//DECAF_printf("addr=0x%x, and leaving = %u, entering = %u in taint_io_read, softmmu_taint_template.h!\n", addr, leaving_1cache, entering_2cache);
+//    	DECAF_printf("addr=0x%x, and diff is s = %lu and ms = %f, overall= %f in taint_io_read, softmmu_taint_template.h!\n", addr, s, ms, transition_overhead);
+    	ld_addr = 0;
+    }
+
 	if (!second_ccache_flag && env->tempidx){
+		ld_addr = addr; //sina: measuring transition overhead
+		clock_gettime(CLOCK_REALTIME, &leaving_1cache);
+		//leaving_1cache = time(NULL); //sina: measuring transition overhead
 		if(ccache_debug){
-			DECAF_printf("Taint tag for memory GVA=0x%x, HVA=0x%x not clean: %d in __taint_ldb_raw_paddr, taint_memory.c:188!\n", addr, physaddr,env->tempidx);
+			DECAF_printf("Taint tag for memory GVA=0x%x, HVA=0x%x not clean: %d in taint_io_read, softmmu_taint_template.h!\n", addr, physaddr,env->tempidx);
 		}
 		env->exception_index = EXCP12_TNT; //sina: longjmp works neater in comparison to raise_exception because the latter passes the exception to guest.
 		tb_temp = tb_find_pc((unsigned long)retaddr);
