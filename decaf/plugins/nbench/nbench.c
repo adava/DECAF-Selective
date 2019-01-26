@@ -34,7 +34,9 @@ static DECAF_Handle randHook_handle = DECAF_NULL_HANDLE;
 DECAF_Handle keystroke_cb_handle = DECAF_NULL_HANDLE;
 static int taint_key_enabled=0;
 
-static char targetname[512];
+static uint8_t mode = -1;
+static uint8_t debug_mode = 0;
+static char *targetname="nbench.exe";
 static uint32_t targetpid;
 static uint32_t targetcr3 = 0;
 time_t current_time;
@@ -47,6 +49,7 @@ static uint32_t cond_func_hook_handle = 0;
 FILE *fp=NULL; //sina
 static uint32_t counter_rand = 0; //sina
 static unsigned long counter_start = 0;
+static unsigned long counter_btaints = 0;
 static unsigned long calls=0;
 static uint32_t random_chance=0;
 static target_ulong gvaaddr;
@@ -58,20 +61,12 @@ void rand_hook_logic(DECAF_Callback_Params *opaque)
 	target_ulong pc_from3 = 0x00402f80;
 	uint32_t random_num1 =0;
 	uint32_t buf;
-//	target_ulong eip = (cpu_single_env->eip && 0xFFFFFF00);
-//	if(targetcr3==cpu_single_env->cr[3] && (eip==pc_from || eip==pc_from2 || eip==pc_from3))
 	if(targetcr3==cpu_single_env->cr[3] && (opaque->be.cur_pc==pc_from || opaque->be.cur_pc==pc_from2 || opaque->be.cur_pc==pc_from3))
 	{
-//		if (gvaaddr){
-//			DECAF_printf("eax=0x%x\n",cpu_single_env->regs[0]);
-//			DECAF_read_mem(cpu_single_env,gvaaddr,4,&buf);
-//			DECAF_printf("gvaaddr=0x%x, buf=0x%x\n",gvaaddr,buf);
-//			gvaaddr+=4;
-//		}
-//		if(opaque->be.cur_pc==pc_from || ((opaque->be.cur_pc&&0xFFFFFF00)==(pc_from&&0xFFFFFF00))){
-//			DECAF_printf("found, cur_pc=0x%x\n",opaque->be.cur_pc);
-//		}
-		//DECAF_printf("cur_pc=0x%x\n",opaque->be.cur_pc);
+		if (debug_mode){
+			DECAF_printf("randnum eax=0x%x\n",cpu_single_env->regs[0]);
+		}
+
 		counter_start++;
 		if(counter_rand==0){
 			if(random_chance!=0){
@@ -103,15 +98,18 @@ void hook_memAlloc(DECAF_Callback_Params *opaque)
 	if(targetcr3==cpu_single_env->cr[3] && (opaque->be.cur_pc==pc_from))
 	{
 				gvaaddr = cpu_single_env->regs[0];
-//				page = cpu_single_env->regs[0] & TARGET_PAGE_MASK;
-//				phys_addr = DECAF_get_phys_addr(cpu_single_env, page);
-//				phys_addr = phys_addr + (cpu_single_env->regs[0] & ~TARGET_PAGE_MASK);
-//				DECAF_read_mem(cpu_single_env,cpu_single_env->regs[0],10,&buf);
-//				DECAF_printf("eax=0x%x, phys_addr=0x%x, buf=0x%x\n",cpu_single_env->regs[0],phys_addr,&buf);
+				if (debug_mode==2){
+					page = cpu_single_env->regs[0] & TARGET_PAGE_MASK;
+					phys_addr = DECAF_get_phys_addr(cpu_single_env, page);
+					phys_addr = phys_addr + (cpu_single_env->regs[0] & ~TARGET_PAGE_MASK);
+					DECAF_read_mem(cpu_single_env,cpu_single_env->regs[0],10,&buf);
+					DECAF_printf("memAlloc eax (gvaaddr for allocated array)=0x%x, phys_addr=0x%x, value at gvaaddr=0x%x\n",cpu_single_env->regs[0],phys_addr,&buf);
+				}
+
 	}
 }
 
-void hook_DonNumIter_printarray(DECAF_Callback_Params *opaque)
+void hook_DonNumIter_printarray(DECAF_Callback_Params *opaque) //sina: this function was used to check whether the identified gvaddr indeed will containt the generated random values
 {
 	target_ulong page, phys_addr;
 	target_ulong vaddr = cpu_single_env->regs[3]; //at the beginning of this loop EBX contains the arraybase address
@@ -135,11 +133,11 @@ void hook_DonNumIter_taintArray(DECAF_Callback_Params *opaque)
 	uint8_t taint = 0xff;
 	if(targetcr3==cpu_single_env->cr[3] && (cpu_single_env->eip==pc_from) && gvaaddr)
 	{
-				//page = vaddr & TARGET_PAGE_MASK;
 				phys_addr = DECAF_get_phys_addr(cpu_single_env, gvaaddr);
-				DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for NumSort\n",gvaaddr,phys_addr);
-				//phys_addr = phys_addr + (vaddr & ~TARGET_PAGE_MASK);
-				taint_mem(phys_addr,counter_rand,&taint);
+				if (debug_mode){
+					DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for NumSort\n",gvaaddr,phys_addr);
+				}
+				taint_mem(phys_addr,counter_btaints,&taint);
 				gvaaddr = 0;
 	}
 }
@@ -151,11 +149,11 @@ void hook_DoStrIter_taintArray(DECAF_Callback_Params *opaque)
 	uint8_t taint = 0xff;
 	if(targetcr3==cpu_single_env->cr[3] && (cpu_single_env->eip==pc_from) && gvaaddr)
 	{
-				//page = vaddr & TARGET_PAGE_MASK;
 				phys_addr = DECAF_get_phys_addr(cpu_single_env, gvaaddr);
-				//DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for StringSort\n",gvaaddr,phys_addr);
-				//phys_addr = phys_addr + (vaddr & ~TARGET_PAGE_MASK);
-				taint_mem(phys_addr,counter_rand,&taint);
+				if (debug_mode){
+					DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for StringSort\n",gvaaddr,phys_addr);
+				}
+				taint_mem(phys_addr,counter_btaints,&taint);
 				gvaaddr = 0;
 	}
 }
@@ -167,11 +165,11 @@ void hook_DoBFIter_taintArray(DECAF_Callback_Params *opaque)
 	uint8_t taint = 0xff;
 	if(targetcr3==cpu_single_env->cr[3] && (cpu_single_env->eip==pc_from) && gvaaddr)
 	{
-				//page = vaddr & TARGET_PAGE_MASK;
 				phys_addr = DECAF_get_phys_addr(cpu_single_env, gvaaddr);
-				DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for BF\n",gvaaddr,phys_addr);
-				//phys_addr = phys_addr + (vaddr & ~TARGET_PAGE_MASK);
-				taint_mem(phys_addr,counter_rand,&taint);
+				if (debug_mode){
+					DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for BF\n",gvaaddr,phys_addr);
+				}
+				taint_mem(phys_addr,counter_btaints,&taint);
 				gvaaddr = 0;
 	}
 }
@@ -179,19 +177,50 @@ void hook_DoBFIter_taintArray(DECAF_Callback_Params *opaque)
 void hook_DoFPE_taintArray(DECAF_Callback_Params *opaque)
 {
 	target_ulong phys_addr;
-	target_ulong pc_from = 0x004026D1; //sina: the block where second time DoStringIteration is executed in loop
+	target_ulong pc_from = 0x004026D1; //sina: the block right after the load loop
 	uint8_t taint = 0xff;
 	if(targetcr3==cpu_single_env->cr[3] && (cpu_single_env->eip==pc_from) && gvaaddr)
 	{
-				//page = vaddr & TARGET_PAGE_MASK;
 				phys_addr = DECAF_get_phys_addr(cpu_single_env, gvaaddr);
-				DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for FPE\n",gvaaddr,phys_addr);
-				//phys_addr = phys_addr + (vaddr & ~TARGET_PAGE_MASK);
-				taint_mem(phys_addr,counter_rand,&taint);
+				if (debug_mode){
+					DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for FPE\n",gvaaddr,phys_addr);
+				}
+				taint_mem(phys_addr,counter_btaints,&taint);
 				gvaaddr = 0;
 	}
 }
 
+void hook_DoIDEA_taintArray(DECAF_Callback_Params *opaque)
+{
+	target_ulong phys_addr;
+	target_ulong pc_from = 0x00408EF1; //sina: the block where plain1 text is loaded with random strings
+	uint8_t taint = 0xff;
+	if(targetcr3==cpu_single_env->cr[3] && (cpu_single_env->eip==pc_from) && gvaaddr)
+	{
+				phys_addr = DECAF_get_phys_addr(cpu_single_env, gvaaddr);
+				if (debug_mode){
+					DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for IDEA\n",gvaaddr,phys_addr);
+				}
+				taint_mem(phys_addr,counter_btaints,&taint);
+				gvaaddr = 0;
+	}
+}
+
+void hook_DoHUF_taintArray(DECAF_Callback_Params *opaque)
+{
+	target_ulong phys_addr;
+	target_ulong pc_from = 0x004093B4; //sina: the block where plain text is loaded with random strings
+	uint8_t taint = 0xff;
+	if(targetcr3==cpu_single_env->cr[3] && (cpu_single_env->eip==pc_from) && gvaaddr)
+	{
+				phys_addr = DECAF_get_phys_addr(cpu_single_env, gvaaddr);
+				if (debug_mode){
+					DECAF_printf("tainting vaddr=0x%x, phys_addr=0x%x for HUFFMAN\n",gvaaddr,phys_addr);
+				}
+				taint_mem(phys_addr,counter_btaints,&taint);
+				gvaaddr = 0;
+	}
+}
 
 static void createproc_callback(VMI_Callback_Params* params)
 {
@@ -205,8 +234,10 @@ static void createproc_callback(VMI_Callback_Params* params)
 	target_ulong pc_DoNumIterationLoopbeginToCallRandNum = 0x00403E53;
 	target_ulong pc_DoNumIterationLoopLoadAfter = 0x00403E6E;//sina: the block right after the load loop
 	target_ulong pc_DoStrIterationLoopLoadAfter = 0x004039E9;//sina: the block right after the load loop
+	target_ulong pc_DoBFIterLoopLoadAfter = 0x00403D41;//sina: the block right after the load loop
 	target_ulong pc_DoFPEIterationLoopLoadAfter = 0x004026D1;//sina: the block right after the load loop
-	//target_ulong pc_DoBFIterLoopLoadAfter = 0x00403D41;//sina: the block right after the load loop
+	target_ulong pc_DoIDEAIterationLoopLoadAfter = 0x00408EF1;//sina: the block right after the load loop
+	target_ulong pc_DoHUFIterationLoopLoadAfter = 0x004093B4;//sina: the block right after the load loop
     if(targetcr3 != 0) //if we have found the process, return immediately
     	return;
 
@@ -214,30 +245,25 @@ static void createproc_callback(VMI_Callback_Params* params)
 		targetpid = params->cp.pid;
 		targetcr3 = params->cp.cr3;
 		DECAF_printf("Process found: pid=%d, cr3=%08x\n", targetpid, targetcr3);
-//		clock_gettime(CLOCK_REALTIME, &proc_start_time);
-//		randHook_handle = hookapi_hook_function(
-//				0, pc , targetcr3, //sina: randnum text address
-//				rand_hook_logic, NULL, 0);
-		//DECAF_registerOptimizedBlockBeginCallback(rand_hook_logic, NULL, pc, OCB_CONST);
-		//DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from,INV_ADDR);
-
-		//good for Random testing
-//		DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from,INV_ADDR);
-//		DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from2,INV_ADDR);
-//		DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from3,INV_ADDR);
-
-
-		DECAF_registerOptimizedBlockEndCallback(hook_memAlloc,NULL,pc_allocmemret,INV_ADDR);
-		//DECAF_registerOptimizedBlockBeginCallback(hook_DonNumIter, NULL, pc_DoNumIterationLoopbeginToCallRandNum, OCB_CONST);
-		//DECAF_registerOptimizedBlockBeginCallback(hook_DonNumIter_taintArray, NULL, pc_DoNumIterationLoopLoadAfter, OCB_CONST);
-		//DECAF_registerOptimizedBlockBeginCallback(hook_DoStrIter_taintArray, NULL, pc_DoStrIterationLoopLoadAfter, OCB_CONST);
-		//DECAF_registerOptimizedBlockBeginCallback(hook_DoBFIter_taintArray, NULL, pc_DoBFIterLoopLoadAfter, OCB_CONST);
-
-		DECAF_registerOptimizedBlockBeginCallback(hook_DoFPE_taintArray, NULL, pc_DoFPEIterationLoopLoadAfter, OCB_CONST);
-
-//		DECAF_registerMatchBlockEndCallback(rand_hook_logic,NULL,pc_from,INV_ADDR);
-//		DECAF_registerMatchBlockEndCallback(rand_hook_logic,NULL,pc_from2,INV_ADDR);
-//		DECAF_registerMatchBlockEndCallback(rand_hook_logic,NULL,pc_from3,INV_ADDR);
+		//clock_gettime(CLOCK_REALTIME, &proc_start_time);
+		//DECAF_registerOptimizedBlockBeginCallback(hook_DonNumIter_printarray, NULL, pc_DoNumIterationLoopbeginToCallRandNum, OCB_CONST);
+		if (mode){
+			DECAF_registerOptimizedBlockEndCallback(hook_memAlloc,NULL,pc_allocmemret,INV_ADDR);
+			DECAF_registerOptimizedBlockBeginCallback(hook_DonNumIter_taintArray, NULL, pc_DoNumIterationLoopLoadAfter, OCB_CONST);
+			DECAF_registerOptimizedBlockBeginCallback(hook_DoStrIter_taintArray, NULL, pc_DoStrIterationLoopLoadAfter, OCB_CONST);
+			DECAF_registerOptimizedBlockBeginCallback(hook_DoBFIter_taintArray, NULL, pc_DoBFIterLoopLoadAfter, OCB_CONST);
+			DECAF_registerOptimizedBlockBeginCallback(hook_DoFPE_taintArray, NULL, pc_DoFPEIterationLoopLoadAfter, OCB_CONST);
+			DECAF_registerOptimizedBlockBeginCallback(hook_DoIDEA_taintArray, NULL, pc_DoIDEAIterationLoopLoadAfter, OCB_CONST);
+			DECAF_registerOptimizedBlockBeginCallback(hook_DoHUF_taintArray, NULL, pc_DoHUFIterationLoopLoadAfter, OCB_CONST);
+		}
+		else{
+			//good for Random testing
+			DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from,INV_ADDR);
+			DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from2,INV_ADDR);
+			DECAF_registerOptimizedBlockEndCallback(rand_hook_logic,NULL,pc_from3,INV_ADDR);
+			//randHook_handle = hookapi_hook_function(0, pc , targetcr3, rand_hook_logic, NULL, 0);
+			//DECAF_registerMatchBlockEndCallback(rand_hook_logic,NULL,pc_from,INV_ADDR);
+		}
 	}
 }
 
@@ -259,12 +285,7 @@ static void removeproc_callback(VMI_Callback_Params* params)
 
 static void nbench_cmd(Monitor* mon, const QDict* qdict)
 {
-	if ((qdict != NULL) && (qdict_haskey(qdict, "procname"))) {
-		strncpy(targetname, qdict_get_str(qdict, "procname"), 512);
-	}
-
-	targetname[511] = '\0';
-
+	mode = 0;
 	if ((qdict != NULL) && (qdict_haskey(qdict, "counter"))) {
 		counter_rand = qdict_get_int(qdict, "counter");
 	}
@@ -273,18 +294,28 @@ static void nbench_cmd(Monitor* mon, const QDict* qdict)
 	}
 }
 
+
+static void nbench(Monitor* mon, const QDict* qdict)
+{
+	mode = 1;
+	if ((qdict != NULL) && (qdict_haskey(qdict, "counter"))) {
+		counter_btaints = qdict_get_int(qdict, "counter");
+	}
+}
+
+static void nbench_debug(Monitor* mon, const QDict* qdict)
+{
+	if ((qdict != NULL) && (qdict_haskey(qdict, "mode"))) {
+		debug_mode = qdict_get_int(qdict, "mode");
+	}
+}
+
 static void nbench_counter(Monitor* mon, const QDict* qdict)
 {
 	//DECAF_printf("Random num1=%d\n, Random num2=%d", random_num1,random_num2);
-	DECAF_printf("Stats: called=%lu, hooked=%lu\n", counter_start,calls);
-
-//	static char counter[512];
-//	if ((qdict != NULL) && (qdict_haskey(qdict, "counter"))) {
-//		strncpy(counter, qdict_get_str(qdict, "counter"), 512);
-//	}
-//	counter[511] = '\0';
-//	counter_rand = atoi(counter);
-
+	if (!mode){
+		DECAF_printf("Stats: called=%lu, hooked=%lu\n", counter_start,calls);
+	}
 }
 
 static void tracing_send_keystroke(DECAF_Callback_Params *params)

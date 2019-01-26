@@ -2381,7 +2381,7 @@ static inline void gen_goto_tb(DisasContext *s, int tb_num, target_ulong eip)
 
     	//By the time this function is called, the env->eip has already been updated to the
     	//  new target. Keep this in mind. Take a look at the gen_jmp_tb code below
-    	if(DECAF_is_BlockEndCallback_needed(tb->pc, pc))
+    	if(DECAF_is_BlockEndCallback_needed(cur_pc, pc))
     	{
           //create temporary variables for tb and from
           //LOK: Updated to use ptr and plain TCGv (target_long) types instead of i32
@@ -2839,7 +2839,7 @@ static void gen_eob(DisasContext *s)
     	//By the time this function is called, the env->eip has already been updated to the
     	//  new target. Keep this in mind. Take a look at the gen_jmp_tb code below
 
-    	if(DECAF_is_BlockEndCallback_needed(s->tb->pc, next_pc))
+    	if(DECAF_is_BlockEndCallback_needed(cur_pc, next_pc))
     	{
           //create temporary variables for tb and from
           //LOK: Updated to use ptr and plain TCGv (target_long) types instead of i32

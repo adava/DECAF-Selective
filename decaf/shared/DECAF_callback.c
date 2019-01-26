@@ -231,7 +231,7 @@ int DECAF_is_BlockEndCallback_needed(gva_t from, gva_t to)
     return (1);
   }
 
-  from &= TARGET_PAGE_MASK;
+//  from &= TARGET_PAGE_MASK;
   //go through the page list first
   if (CountingHashtable_exist(pOBEFromPageTable, from))
   {
@@ -264,7 +264,7 @@ DECAF_Handle DECAF_registerOptimizedBlockBeginCallback(
   }
 
   //Heng: Optimization on OCB_CONST is not stable. We use OCB_ALL instead for now.
-  if (type == OCB_CONST) type = OCB_ALL;
+//  if (type == OCB_CONST) type = OCB_ALL; //sina ruins the exact analysis
 
   //pre-populate the info
   cb_struct->callback = cb_func;
@@ -534,7 +534,7 @@ DECAF_Handle DECAF_registerOptimizedBlockEndCallback(
 			return(DECAF_NULL_HANDLE);
 		}
 
-		if (CountingHashtable_add(pOBEFromPageTable, from & TARGET_PAGE_MASK) == 1)
+		if (CountingHashtable_add(pOBEFromPageTable, from) == 1)
 		{
 			DECAF_flushTranslationCache(PAGE_LEVEL,from);
 		}

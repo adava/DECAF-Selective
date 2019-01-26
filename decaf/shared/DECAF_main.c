@@ -773,6 +773,7 @@ void taint_reg(CPUState* env, unsigned int reg){
 
 #if defined(CONFIG_TCG_TAINT)
 	env->taint_regs[reg] = 0xffffffff; //sina: put it in the taintcheck API.
+//	env->tempidx = 0xffffffff;
 #if defined(CONFIG_2nd_CCACHE) //sina
 	if (!second_ccache_flag){
 		env->exception_index = EXCP12_TNT; //sina: longjmp works neater in comparison to raise_exception because the latter passes the exception to guest.
